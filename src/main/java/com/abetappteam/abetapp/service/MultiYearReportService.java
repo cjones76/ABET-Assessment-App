@@ -216,7 +216,7 @@ public class MultiYearReportService {
         return buildReportForSemesters(programId, semesterIdSet, semesters, academicYear, semesterName, generatedDate);
     }
 
-    /**
+    /** UPDATE THIS
      * Core report building logic for a given set of semesters.
      *
      * Traversal order: program → sectionProgram → section
@@ -224,6 +224,7 @@ public class MultiYearReportService {
      * ALSO: schedule_entry → measures (via schedule_entry_id)
      * → indicator → outcome → measure_results (via measure_id)
      */
+
     private MultiYearReportData buildReportForSemesters(
             Long programId,
             Set<Integer> semesterIdSet,
@@ -232,159 +233,181 @@ public class MultiYearReportService {
             String semesterName,
             String generatedDate) {
 
-        logger.info("Building report for academic year {} ({} semesters)", academicYear, semesters.size());
+        logger.info("Building CLEAN schedule-driven report for {}", academicYear);
 
-        // program → section_programs → sections in semester set → course IDs
-        List<SectionProgram> sectionPrograms = sectionProgramRepository.findByProgramId(programId.intValue());
-        Set<Long> courseIdsInRange = new HashSet<>();
-        for (SectionProgram sp : sectionPrograms) {
-            sectionRepository.findById((long) sp.getSectionId())
-                    .filter(sec -> semesterIdSet.contains(sec.getSemesterId()))
-                    .ifPresent(sec -> courseIdsInRange.add((long) sec.getCourseId()));
+        // STEP 1: Pull ALL schedule entries for program + semesters
+        List<ScheduleEntry> scheduleEntries = semesterIdSet.stream()
+                .flatMap(semId ->
+                        scheduleEntryRepository
+                                .findBySemesterIdAndProgramId(programId.intValue(), semId)
+                                .stream()
+                )
+                .toList();
+
+        if (scheduleEntries.isEmpty()) {
+            throw new BusinessException("No schedule entries found for selected range");
         }
 
-        if (courseIdsInRange.isEmpty()) {
-            throw new BusinessException("No courses found for this program in the selected date range");
-        }
-
-        logger.info("Found {} courses for academic year {} via section path", courseIdsInRange.size(), academicYear);
-
-        // Maps for building the hierarchical output
+        // DTO maps
         Map<Long, OutcomeReportData> outcomeMap = new LinkedHashMap<>();
-        Map<String, IndicatorReportData> indicatorMap = new LinkedHashMap<>();
-        Map<Long, Set<String>> recommendedActionsMap = new HashMap<>();
-        Map<Long, String> outcomeEvaluationMap = new HashMap<>();
-        Set<Long> processedMeasureIds = new HashSet<>();
+        Map<Long, IndicatorReportData> indicatorMap = new LinkedHashMap<>();
 
-        for (Long courseId : courseIdsInRange) {
-            Course course = courseRepository.findById(courseId)
-                    .filter(Course::getIsActive)
+        // Aggregation helpers
+        Map<Long, List<Double>> indicatorToMeasureAverages = new HashMap<>();
+        Map<Long, List<Double>> outcomeToIndicatorAverages = new HashMap<>();
+
+        // STEP 2: Iterate schedule entries
+        for (ScheduleEntry se : scheduleEntries) {
+
+            PerformanceIndicator indicator = performanceIndicatorRepository
+                    .findById((long) se.getIndicatorId())
                     .orElse(null);
-            if (course == null) continue;
 
-            List<CourseIndicator> courseIndicators = courseIndicatorRepository.findByCourseIdAndIsActive(courseId, true);
+            if (indicator == null || !Boolean.TRUE.equals(indicator.getIsActive())) continue;
 
-            for (CourseIndicator ci : courseIndicators) {
-                // Get measures via course_indicator_id (old data path)
-                List<Measure> measures = measureRepository.findByCourseIndicatorId(ci.getId());
+            Outcome outcome = outcomeRepository
+                    .findById(indicator.getStudentOutcomeId())
+                    .orElse(null);
 
-                // Also check schedule_entry for newer measures linked via schedule_entry_id
-                List<ScheduleEntry> scheduleEntries = scheduleEntryRepository.findByCourseId(courseId.intValue())
-                        .stream()
-                        .filter(se -> semesterIdSet.contains(se.getSemesterId())
-                                && se.getIndicatorId() == ci.getIndicatorId().intValue())
-                        .toList();
-                for (ScheduleEntry se : scheduleEntries) {
-                    List<Measure> newMeasures = measureRepository.findByScheduleEntryId(se.getId());
-                    for (Measure m : newMeasures) {
-                        if (measures.stream().noneMatch(existing -> existing.getId().equals(m.getId()))) {
-                            measures = new ArrayList<>(measures);
-                            measures.add(m);
-                        }
-                    }
+            if (outcome == null || !Boolean.TRUE.equals(outcome.getActive())) continue;
+
+            // Create DTOs
+            OutcomeReportData outcomeDto = outcomeMap.computeIfAbsent(
+                    outcome.getId(),
+                    id -> new OutcomeReportData(
+                            outcome.getId(),
+                            outcome.getNumber(),
+                            outcome.getDescription(),
+                            ""
+                    )
+            );
+
+            IndicatorReportData indicatorDto = indicatorMap.computeIfAbsent(
+                    indicator.getId(),
+                    id -> new IndicatorReportData(
+                            indicator.getId(),
+                            outcome.getNumber() + "." + indicator.getIndicatorNumber(),
+                            null,
+                            0
+                    )
+            );
+
+            // STEP 3: Measures from schedule entry ONLY
+            List<Measure> measures = measureRepository.findByScheduleEntryId(se.getId());
+            if (measures.isEmpty()) continue;
+
+            for (Measure measure : measures) {
+
+                List<MeasureResult> results =
+                        measureResultRepository.findByMeasureId(measure.getId());
+
+                int met = 0;
+                int exceeded = 0;
+                int below = 0;
+
+                for (MeasureResult r : results) {
+                    met += r.getStudentsMet() != null ? r.getStudentsMet() : 0;
+                    exceeded += r.getStudentsExceeded() != null ? r.getStudentsExceeded() : 0;
+                    below += r.getStudentsBelow() != null ? r.getStudentsBelow() : 0;
                 }
 
-                if (measures.isEmpty()) continue;
+                double measureAvg = calculateMetPercentage(met, exceeded, below);
+                String status = determineStatus(measureAvg);
 
-                PerformanceIndicator indicator = performanceIndicatorRepository.findById(ci.getIndicatorId())
-                        .filter(pi -> Boolean.TRUE.equals(pi.getIsActive()))
-                        .orElse(null);
-                if (indicator == null) continue;
+                ReportMeasureData measureDto = new ReportMeasureData(
+                        measure.getId(),
+                        null,
+                        null,
+                        measure.getDescription(),
+                        met,
+                        exceeded,
+                        below,
+                        measureAvg,
+                        status,
+                        null,
+                        measure.getRecommendedAction()
+                );
 
-                Outcome outcome = outcomeRepository.findById(indicator.getStudentOutcomeId())
-                        .filter(o -> Boolean.TRUE.equals(o.getActive()))
-                        .orElse(null);
-                if (outcome == null) continue;
+                indicatorDto.addMeasure(measureDto);
 
-                String indicatorKey = outcome.getId() + "_" + indicator.getId() + "_" + courseId;
-                String indicatorNumber = String.format("%d.%d", outcome.getNumber(), indicator.getIndicatorNumber());
-                IndicatorReportData reportIndicator = indicatorMap.computeIfAbsent(indicatorKey,
-                        k -> new IndicatorReportData(indicator.getId(), indicatorNumber, course.getCourseCode(),
-                                course.getStudentCount()));
-
-                outcomeMap.computeIfAbsent(outcome.getId(),
-                        k -> new OutcomeReportData(outcome.getId(), outcome.getNumber(), outcome.getDescription(), ""));
-                recommendedActionsMap.computeIfAbsent(outcome.getId(), k -> new HashSet<>());
-                outcomeEvaluationMap.putIfAbsent(outcome.getId(), outcome.getEvaluation());
-
-                for (Measure measure : measures) {
-                    if (!processedMeasureIds.add(measure.getId())) continue;
-
-                    List<MeasureResult> results = measureResultRepository.findByMeasureId(measure.getId());
-                    MeasureResult result = results.isEmpty() ? null : results.get(0);
-
-                    Double metPercentage = 0.0;
-                    Integer met = 0;
-                    Integer exceeded = 0;
-                    Integer below = 0;
-                    String status = "Not met";
-                    String note = null;
-
-                    if (result != null) {
-                        met = result.getStudentsMet() != null ? result.getStudentsMet() : 0;
-                        exceeded = result.getStudentsExceeded() != null ? result.getStudentsExceeded() : 0;
-                        below = result.getStudentsBelow() != null ? result.getStudentsBelow() : 0;
-                        metPercentage = calculateMetPercentage(met, exceeded, below);
-                        status = determineStatus(metPercentage);
-                        note = result.getObservation();
-                    }
-
-                    ReportMeasureData reportMeasure = new ReportMeasureData(
-                            measure.getId(), ci.getId(), course.getCourseCode(),
-                            measure.getDescription(), met, exceeded, below, metPercentage, status, note,
-                            measure.getRecommendedAction());
-
-                    reportIndicator.addMeasure(reportMeasure);
-
-                    if (measure.getRecommendedAction() != null && !measure.getRecommendedAction().trim().isEmpty()) {
-                        recommendedActionsMap.get(outcome.getId()).add(measure.getRecommendedAction());
-                    }
-                }
+                // Track for indicator averaging
+                indicatorToMeasureAverages
+                        .computeIfAbsent(indicator.getId(), k -> new ArrayList<>())
+                        .add(measureAvg);
             }
+        }
+
+        if (indicatorToMeasureAverages.isEmpty()) {
+            throw new BusinessException("No measure data found for selected range");
+        }
+
+        // STEP 4: Indicator averages
+        Map<Long, Double> indicatorAverages = new HashMap<>();
+
+        for (Map.Entry<Long, List<Double>> entry : indicatorToMeasureAverages.entrySet()) {
+
+            double avg = entry.getValue().stream()
+                    .mapToDouble(Double::doubleValue)
+                    .average()
+                    .orElse(0.0);
+
+            indicatorAverages.put(entry.getKey(), avg);
+
+            PerformanceIndicator indicator = performanceIndicatorRepository
+                    .findById(entry.getKey())
+                    .orElse(null);
+
+            if (indicator != null) {
+                outcomeToIndicatorAverages
+                        .computeIfAbsent(indicator.getStudentOutcomeId(), k -> new ArrayList<>())
+                        .add(avg);
+            }
+        }
+
+        // STEP 5: Attach indicators to outcomes + compute outcome avg
+        for (OutcomeReportData outcomeDto : outcomeMap.values()) {
+
+            List<IndicatorReportData> indicators = indicatorMap.values().stream()
+                    .filter(ind -> {
+                        PerformanceIndicator pi = performanceIndicatorRepository
+                                .findById(ind.getIndicatorId())
+                                .orElse(null);
+                        return pi != null && pi.getStudentOutcomeId().equals(outcomeDto.getOutcomeId());
+                    })
+                    .toList();
+
+            outcomeDto.setIndicators(indicators);
+
+            List<Double> indicatorAvgs =
+                    outcomeToIndicatorAverages.getOrDefault(outcomeDto.getOutcomeId(), new ArrayList<>());
+
+            double outcomeAvg = indicatorAvgs.stream()
+                    .mapToDouble(Double::doubleValue)
+                    .average()
+                    .orElse(0.0);
+
+            outcomeDto.setOverallStatus(determineStatus(outcomeAvg));
         }
 
         if (outcomeMap.isEmpty()) {
-            throw new BusinessException("No measures found for academic year " + academicYear);
+            throw new BusinessException("No outcomes found for selected range");
         }
 
-        // Assemble final outcome list with their indicators, sorted by outcome number
-        List<OutcomeReportData> reportOutcomes = new ArrayList<>();
-        List<Map.Entry<Long, OutcomeReportData>> sortedEntries = outcomeMap.entrySet().stream()
-                .sorted(Comparator.comparingInt(e -> e.getValue().getOutcomeNumber()))
-                .collect(Collectors.toList());
-
-        for (Map.Entry<Long, OutcomeReportData> entry : sortedEntries) {
-            Long outcomeId = entry.getKey();
-            OutcomeReportData reportOutcome = entry.getValue();
-
-            List<IndicatorReportData> indicators = indicatorMap.entrySet().stream()
-                    .filter(e -> e.getKey().startsWith(outcomeId + "_"))
-                    .map(Map.Entry::getValue)
-                    .filter(ind -> !ind.getMeasures().isEmpty())
-                    .collect(Collectors.toList());
-
-            if (!indicators.isEmpty()) {
-                String evaluation = outcomeEvaluationMap.get(outcomeId);
-                String computedStatus = determineOutcomeStatus(indicators);
-                reportOutcome.setOverallStatus(evaluation != null && !evaluation.isBlank() ? evaluation : computedStatus);
-                reportOutcome.setIndicators(indicators);
-                reportOutcome.setRecommendedActions(
-                        new ArrayList<>(recommendedActionsMap.getOrDefault(outcomeId, new HashSet<>())));
-                reportOutcomes.add(reportOutcome);
-            }
-        }
-
-        if (reportOutcomes.isEmpty()) {
-            throw new BusinessException("No measures found for academic year " + academicYear);
-        }
-
+        // FINAL RESPONSE
         MultiYearReportData response = new MultiYearReportData(
-                semesters.get(0).getId(), semesterName, academicYear, generatedDate);
-        response.setOutcomes(reportOutcomes);
+                semesters.get(0).getId(),
+                semesterName,
+                academicYear,
+                generatedDate
+        );
 
-        logger.info("Built report for academic year {} with {} outcomes", academicYear, reportOutcomes.size());
+        response.setOutcomes(new ArrayList<>(outcomeMap.values()));
+
+        logger.info("Built CLEAN report with {} outcomes", outcomeMap.size());
+
         return response;
     }
+
 
     /**
      * Calculates the percentage of students that met or exceeded the measure.

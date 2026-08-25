@@ -27,6 +27,9 @@ public interface ScheduleEntryRepository extends JpaRepository<ScheduleEntry, Lo
     List<ScheduleEntry> findByCourseId(int courseId);
     long countByCourseId(int courseId);
 
+    List<ScheduleEntry> findBySemesterIdAndProgramId(int semesterId, int programId);
+    long countBySemesterIdAndProgramId(int semesterId, int programId);
+
     // Program ID queries
     List<ScheduleEntry> findByProgramId(int programId);
     long countByProgramId(int programId);

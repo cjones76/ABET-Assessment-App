@@ -23,11 +23,6 @@ public class Measure extends BaseEntity {
     @Column(name = "is_active", nullable = false)
     private Boolean active;
 
-    @Column(name = "course_indicator_id", nullable = true)
-    private Long courseIndicatorId;
-
-    @Column(name = "semester_id", nullable = true)
-    private Long semesterId;
     // ------------------------------------------
     // Constructors
     // ------------------------------------------
@@ -40,15 +35,11 @@ public class Measure extends BaseEntity {
             Long scheduleEntryId,
             String description,
             String recommendedAction,
-            Long courseIndicatorId,
-            Long semesterId,
             Boolean active
     ) {
         this.scheduleEntryId = scheduleEntryId;
         this.description = description;
         this.recommendedAction = recommendedAction;
-        this.courseIndicatorId = courseIndicatorId;
-        this.semesterId = semesterId;
         this.active = active;
     }
 
@@ -79,19 +70,7 @@ public class Measure extends BaseEntity {
         this.active = active;
     }
 
-    public Long getCourseIndicatorId() {
-        return courseIndicatorId;
-    }
-    public void setCourseIndicatorId(Long courseIndicatorId) {
-        this.courseIndicatorId = courseIndicatorId;
-    }
 
-    public Long getSemesterId() {
-        return semesterId;
-    }
-    public void setSemesterId(Long semesterId) {
-        this.semesterId = semesterId;
-    }
     // ------------------------------------------
     // toString()
     // ------------------------------------------
@@ -104,8 +83,6 @@ public class Measure extends BaseEntity {
                 ", description='" + description + '\'' +
                 ", recommendedAction='" + recommendedAction + '\'' +
                 ", active=" + active +
-                ", courseIndicatorId=" + courseIndicatorId +
-                ", semesterId=" + semesterId +
                 ", createdAt=" + getCreatedAt() +
                 ", updatedAt=" + getUpdatedAt() +
                 '}';

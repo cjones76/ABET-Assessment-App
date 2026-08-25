@@ -34,7 +34,6 @@ public class MultiYearReportData implements Serializable {
     public Long getSemesterId() {
         return semesterId;
     }
-
     public void setSemesterId(Long semesterId) {
         this.semesterId = semesterId;
     }
@@ -42,7 +41,6 @@ public class MultiYearReportData implements Serializable {
     public String getSemesterName() {
         return semesterName;
     }
-
     public void setSemesterName(String semesterName) {
         this.semesterName = semesterName;
     }
@@ -50,7 +48,6 @@ public class MultiYearReportData implements Serializable {
     public String getAcademicYear() {
         return academicYear;
     }
-
     public void setAcademicYear(String academicYear) {
         this.academicYear = academicYear;
     }
@@ -58,7 +55,6 @@ public class MultiYearReportData implements Serializable {
     public String getGeneratedDate() {
         return generatedDate;
     }
-
     public void setGeneratedDate(String generatedDate) {
         this.generatedDate = generatedDate;
     }
@@ -66,7 +62,6 @@ public class MultiYearReportData implements Serializable {
     public List<String> getGeneratedBy() {
         return generatedBy;
     }
-
     public void setGeneratedBy(List<String> generatedBy) {
         this.generatedBy = generatedBy;
     }
@@ -78,7 +73,6 @@ public class MultiYearReportData implements Serializable {
     public List<OutcomeReportData> getOutcomes() {
         return outcomes;
     }
-
     public void setOutcomes(List<OutcomeReportData> outcomes) {
         this.outcomes = outcomes;
     }

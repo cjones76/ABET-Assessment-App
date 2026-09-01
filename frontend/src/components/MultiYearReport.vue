@@ -32,8 +32,6 @@ onMounted(async () => {
     loadingUI.value = true;
     const res = await api.get('/semesters', {
       params: {
-        // No filter - load all semesters for the program
-        academicYear: null
       }
     });
     allSemesters.value = (res.data.data ?? [])

@@ -395,7 +395,7 @@ function openSectionDetails(sectionId: number) {
       <section class="detail-section">
         <h3>Sections ({{ currentCourseSemesterSections.length }})</h3>
 
-        <div v-if="currentCourseSemesterSections.length > 0">
+        <div>
           <table class="courses-table">
             <thead>
             <tr>
@@ -476,9 +476,6 @@ function openSectionDetails(sectionId: number) {
           </table>
         </div>
 
-        <p class="no-courses">
-          No courses assigned to this instructor for the current semester.
-        </p>
       </section>
 
       <!-- Empty State -->

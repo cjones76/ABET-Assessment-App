@@ -145,7 +145,10 @@ export function useSummaryReportData(props: SummaryReportProps) {
       // ------------------------------
       // Load Semester
       // ------------------------------
-      const semesterRes = await api.get(`/semesters/${semesterId.value}`);
+      const semesterRes = await api.get('/semesters', {
+        params: { id: semesterId.value }
+      });
+
       const semester = semesterRes.data.data;
 
       if (!semester) throw new Error('Semester not found');
@@ -223,32 +226,62 @@ export function useSummaryReportData(props: SummaryReportProps) {
         for (const indicator of indicators) {
           // find courses assessing this indicator
           for (const course of allCourses) {
-            const indicatorIdsRes = await api.get(`/courses/${course.id}/indicators`);
-            const indicatorIds = indicatorIdsRes.data ?? [];
+            // Get sections for this course
+            const sectionsRes = await api.get(`/section`, {
+              params: { courseId: course.id }
+            });
+            const sections = sectionsRes.data.data.sections ?? [];
 
-            if (!indicatorIds.includes(indicator.id)) continue;
 
-            // measures for this indicator
-            const indicatorMeasuresRes = await api.get(`/measure/byIndicator/${indicator.id}`);
-            const indicatorMeasures = indicatorMeasuresRes.data.data ?? [];
+            if (sections.length === 0) break;
 
-            // measures for this course
-            const courseMeasuresRes = await api.get(`/measure/byCourse/${course.id}`);
-            const courseMeasures = courseMeasuresRes.data.data ?? [];
+            // Get section IDs
+            const sectionIds = sections.map((s: any) => s.id);
 
-            // intersection = measures belonging to this indicator AND this course
-            const matched = indicatorMeasures.filter((m: any) =>
-              courseMeasures.some((cm: any) => cm.id === m.id)
-            );
 
-            console.log(`  Course ${course.courseCode} + Indicator ${indicator.id}: ${matched.length} measures`);
+            // Get section-indicators for these sections that match this outcome's indicator
+            const sectionIndicatorsRes = await api.get(`/section-indicator`, {
+              params: {
+                sectionIds: sectionIds,
+                indicatorIds: [indicator.id]
+              }
+            });
+            const sectionIndicators = sectionIndicatorsRes.data.data ?? [];
+
+
+            if (sectionIndicators.length === 0) continue;
+
+            // Get section-program relationships for these sections
+            const sectionProgramRes = await api.get(`/section-program`, {
+              params: {
+                sectionId: sections[0].id, // Query by first section (all should have same program)
+                programId: programId.value
+              }
+            });
+            const sectionPrograms = sectionProgramRes.data.data ?? [];
+
+            if (sectionPrograms.length === 0) continue;
+
+            // Get section-program IDs
+            const sectionProgramIds = sectionPrograms.map((sp: any) => sp.id);
+
+            // Get measure results for these section-programs
+            const measureResultsRes = await api.get(`/measure-result`, {
+              params: {
+                sectionProgramId: sectionProgramIds[0] // Use first section-program ID
+              }
+            });
+            const measureResults = measureResultsRes.data.data ?? [];
+
+
+            const matched = measureResults;
 
             const formattedMeasures: IndicatorMeasure[] = [];
 
-            for (const measure of matched) {
-              const met = measure.met ?? measure.studentsMet;
-              const exceeded = measure.exceeded ?? measure.studentsExceeded;
-              const below = measure.below ?? measure.studentsBelow;
+            for (const measureResult of matched) {
+              const met = measureResult.studentsMet;
+              const exceeded = measureResult.studentsExceeded;
+              const below = measureResult.studentsBelow;
 
               if (met == null || exceeded == null || below == null) continue;
 
@@ -256,14 +289,12 @@ export function useSummaryReportData(props: SummaryReportProps) {
               const status = determineStatus(pct);
 
               const desc =
-                measure.measureDescription ||
-                measure.measure_description ||
-                measure.description ||
+                measureResult.observation ||
                 'No description';
 
               formattedMeasures.push({
-                measureId: measure.id,
-                courseIndicatorId: measure.courseIndicatorId,
+                measureId: measureResult.id,
+                courseIndicatorId: measureResult.sectionProgramId,
                 courseCode: course.courseCode,
                 description: desc,
                 studentsMet: met,
@@ -274,12 +305,12 @@ export function useSummaryReportData(props: SummaryReportProps) {
                 below,
                 metPercentage: pct,
                 status,
-                note: measure.observation ?? undefined,
-                recommendedAction: measure.recommendedAction ?? null,
+                note: measureResult.observation ?? undefined,
+                recommendedAction: measureResult.recommendedAction ?? null,
               });
 
-              if (measure.recommendedAction) {
-                recommendedActions.push(measure.recommendedAction);
+              if (measureResult.recommendedAction) {
+                recommendedActions.push(measureResult.recommendedAction);
               }
             }
 

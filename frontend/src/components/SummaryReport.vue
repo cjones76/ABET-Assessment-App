@@ -80,15 +80,11 @@ async function loadSemesters() {
   try {
     const res = await api.get('/semesters', {
       params: {
-        programId: props.programId,
-        page: 0,
-        size: 100,
-        sort: 'academicYear',
-        direction: 'desc'
+        programId: props.programId
       }
     });
 
-    semesters.value = res.data.content || [];
+    semesters.value = Array.isArray(res.data.data) ? res.data.data : (res.data.content || []);
 
     const current = semesters.value.find(s => s.isCurrent);
 

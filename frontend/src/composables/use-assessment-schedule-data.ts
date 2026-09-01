@@ -170,7 +170,7 @@ export function useAssessmentScheduleData(props: AssessmentScheduleProps) {
       } else {
         // Fall back to latest semester
         const semestersRes = await api.get('/semesters', {
-          params: { programId: props.programId, page: 0, size: 100 }
+          params: { programId: props.programId }
         });
 
         const semesters = semestersRes.data.content || [];
